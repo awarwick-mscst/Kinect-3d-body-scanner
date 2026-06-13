@@ -72,9 +72,10 @@ namespace KinectScanner
         private bool sensorWasAvailable;
 
         // Audio cues — let the user scan by ear without watching the screen.
+        private enum AudioCue { Good, Lost, Quiet }
         private SoundCues soundCues;
         private DispatcherTimer audioTimer;
-        private bool audioLost;
+        private AudioCue audioCue = AudioCue.Good;
         private DateTime lastHeartbeat;
         private DateTime lastAlert;
         // Consecutive tracking failures before the audio declares "lost" (hysteresis
@@ -271,6 +272,7 @@ namespace KinectScanner
             VolumePreset preset = CurrentPreset;
             MinDepthSlider.Value = preset.DefaultMinDepth;
             MaxDepthSlider.Value = preset.DefaultMaxDepth;
+            PresetTip.Text = preset.Tip;
             RecreateVolumeAsync(preset);
         }
 
@@ -397,7 +399,7 @@ namespace KinectScanner
 
                 bool trackingOk;
                 int framesIntegrated, consecutiveFailures, storedPoses;
-                bool justRecovered;
+                bool justRecovered, sparseView;
                 var stopwatch = Stopwatch.StartNew();
                 lock (engineLock)
                 {
@@ -412,6 +414,7 @@ namespace KinectScanner
                     consecutiveFailures = engine.ConsecutiveFailures;
                     storedPoses = engine.StoredPoseCount;
                     justRecovered = engine.JustRecovered;
+                    sparseView = engine.SparseDepthView;
                 }
                 stopwatch.Stop();
                 lastFusionMs = (int)stopwatch.ElapsedMilliseconds;
@@ -445,6 +448,13 @@ namespace KinectScanner
                             TrackingDot.Fill = Brushes.LimeGreen;
                             TrackingText.Text = "Tracking";
                         }
+                        else if (sparseView)
+                        {
+                            // Too little depth to fairly expect tracking — not the user's fault.
+                            TrackingDot.Fill = Brushes.SlateGray;
+                            TrackingText.Text = "Sparse view — turn more of yourself into frame";
+                            TrackingBanner.Visibility = Visibility.Collapsed;
+                        }
                         else
                         {
                             bool recovering = autoRecover && storedPoses > 0;
@@ -454,7 +464,7 @@ namespace KinectScanner
                                 : "Tracking lost (" + consecutiveFailures + ")";
                         }
 
-                        UpdateAudioState(trackingOk, consecutiveFailures);
+                        UpdateAudioState(trackingOk, consecutiveFailures, sparseView);
                     }), DispatcherPriority.Render);
                 }
             }
@@ -575,17 +585,19 @@ namespace KinectScanner
             StartButton.IsEnabled = false;
             float minDepth = (float)MinDepthSlider.Value;
             bool autoRecover = AutoRecoveryCheck.IsChecked == true;
+            bool smoothDepth = SmoothDepthCheck.IsChecked == true;
             await Task.Run(() =>
             {
                 lock (engineLock)
                 {
                     engine.AutoRecoveryEnabled = autoRecover;
+                    engine.SmoothDepth = smoothDepth;
                     engine.Reset(minDepth);
                 }
             });
 
             colorPhase = 0;
-            audioLost = false;
+            audioCue = AudioCue.Good;
             lastHeartbeat = DateTime.UtcNow;
             lastAlert = DateTime.UtcNow;
             state = ScanState.Scanning;
@@ -780,6 +792,19 @@ namespace KinectScanner
             }
         }
 
+        private void SmoothDepthCheck_Changed(object sender, RoutedEventArgs e)
+        {
+            if (!initialized)
+            {
+                return;
+            }
+
+            lock (engineLock)
+            {
+                engine.SmoothDepth = SmoothDepthCheck.IsChecked == true;
+            }
+        }
+
         private void UpdateUiState()
         {
             bool idle = state == ScanState.Idle;
@@ -808,39 +833,50 @@ namespace KinectScanner
         /// Called on the UI thread for each processed frame. Plays one-shot tones on
         /// good↔lost transitions; the repeating heartbeat/alert is driven by the timer.
         /// </summary>
-        private void UpdateAudioState(bool trackingOk, int consecutiveFailures)
+        private void UpdateAudioState(bool trackingOk, int consecutiveFailures, bool sparseView)
         {
             if (soundCues == null || AudioCuesCheck.IsChecked != true || state != ScanState.Scanning)
             {
                 return;
             }
 
-            bool nowLost;
+            AudioCue next;
             if (trackingOk)
             {
-                nowLost = false;
+                next = AudioCue.Good;
+            }
+            else if (sparseView)
+            {
+                next = AudioCue.Quiet; // a depth-coverage problem, not the user going too fast
             }
             else if (consecutiveFailures >= AudioLostThreshold)
             {
-                nowLost = true;
+                next = AudioCue.Lost;
             }
             else
             {
-                nowLost = audioLost; // hysteresis: hold state through a stray failure
+                next = audioCue; // hysteresis: hold through a stray failure
             }
 
-            if (nowLost && !audioLost)
+            if (next != audioCue)
             {
-                soundCues.PlayLost();           // good → lost
-                lastAlert = DateTime.UtcNow;
-            }
-            else if (!nowLost && audioLost)
-            {
-                soundCues.PlayRecovered();      // lost → regained
-                lastHeartbeat = DateTime.UtcNow;
-            }
+                if (next == AudioCue.Lost)
+                {
+                    soundCues.PlayLost();                 // → genuinely lost
+                    lastAlert = DateTime.UtcNow;
+                }
+                else if (next == AudioCue.Good && audioCue == AudioCue.Lost)
+                {
+                    soundCues.PlayRecovered();            // lost → regained
+                    lastHeartbeat = DateTime.UtcNow;
+                }
+                else if (next == AudioCue.Good)
+                {
+                    lastHeartbeat = DateTime.UtcNow;      // resume heartbeat fresh after a quiet spell
+                }
 
-            audioLost = nowLost;
+                audioCue = next;
+            }
         }
 
         private void AudioTimer_Tick(object sender, EventArgs e)
@@ -851,7 +887,7 @@ namespace KinectScanner
             }
 
             DateTime now = DateTime.UtcNow;
-            if (audioLost)
+            if (audioCue == AudioCue.Lost)
             {
                 if ((now - lastAlert).TotalMilliseconds >= AlertIntervalMs)
                 {
@@ -859,7 +895,7 @@ namespace KinectScanner
                     lastAlert = now;
                 }
             }
-            else
+            else if (audioCue == AudioCue.Good)
             {
                 if ((now - lastHeartbeat).TotalMilliseconds >= HeartbeatIntervalMs)
                 {
@@ -867,6 +903,7 @@ namespace KinectScanner
                     lastHeartbeat = now;
                 }
             }
+            // AudioCue.Quiet: say nothing
         }
 
         private void AudioCuesCheck_Changed(object sender, RoutedEventArgs e)

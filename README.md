@@ -28,6 +28,11 @@ dotnet build -c Release
 1. **Camera setup:** put the Kinect on a tripod or shelf at chest height, level,
    pointing at open space (no walls/furniture within ~3 m behind you if possible).
 2. **Pick a preset** — *Bust* (highest detail), *Seated person*, or *Full body, standing*.
+   Each preset shows a tip with the rotation speed it needs. Note that **Bust is the
+   most motion-sensitive** mode: at close range a small turn moves a lot across the
+   sensor, and a head has little geometry to track, so it needs a *very* slow turn
+   (~2 min) and your shoulders kept in frame. If you're finding it fiddly, *Seated
+   person* is far more forgiving and still captures good facial detail.
 3. **Sit/stand at the right distance** and use the live depth preview to frame
    yourself: your body should be bright, everything else dark.
 4. **Tighten the depth window:** set the far clip just behind your back and the near
@@ -82,11 +87,18 @@ through MeshLab/Blender for hole filling (e.g. Poisson reconstruction) and clean
   searches that database for the current viewpoint and snaps the camera back onto it.
   This is what lets you rotate at a natural speed instead of nailing a perfect slow
   turn. Recovery uses the depth silhouette (not RGB), so it works with color off too.
+- **Smooth depth (steadier tracking)** — bilateral-filters the depth before tracking
+  (SDK `SmoothDepthFloatFrame`) so the ICP tracker has a cleaner surface to lock onto.
+  This is the main fix for losing tracking on hard surfaces — mesh or dark office-chair
+  backs, and flat featureless panels. On by default; turn it off only if you want the
+  absolute maximum fine detail on a well-lit, feature-rich subject.
 - **Audio cues (scan by ear)** — maps the tracking state to sound so you don't have to
   watch the screen while you turn: a soft tick every ~2 s means tracking is good, a
   repeating descending buzz means tracking is lost (slow down / hold still), and a
   rising chime means it recovered. Tones are synthesized in memory (no sound files)
-  and play through your default audio device.
+  and play through your default audio device. When the view is too feature-poor to
+  track fairly (e.g. a dark mesh chair back fills the frame), the buzz is suppressed
+  and the status shows "Sparse view" instead of falsely nagging you to slow down.
 
 ## Preparing the model for 3D printing
 
@@ -138,6 +150,14 @@ but you'll want to clean it before slicing in Cura:
   (hardware minimum). Make sure *you* fill most of the in-range (bright) pixels.
 - **Ghosting / doubled limbs** — you moved relative to yourself (lifted an arm,
   tilted your head). Reset and rescan, holding the pose rigid.
+- **Tracking freaks out on a chair back / blank wall / flat panel** — featureless or
+  IR-absorbing surfaces (dark mesh chair backs especially) starve the geometric
+  tracker, so it stalls even when you're barely moving. Mitigations, in order:
+  keep **Smooth depth** on; make sure *you* (head/shoulders/arms — feature-rich
+  geometry) stay in frame rather than the camera ending up pointed at a bare panel;
+  drape a textured cloth or tape a few markers on a totally flat back to give the
+  tracker something to grip. The status shows **Sparse view** (and stays quiet)
+  instead of buzzing when this is the surface's fault rather than yours.
 - **Low fps** — check the status bar: if it says CPU mode, your GPU lacks DX11
   support. Also close other GPU-heavy apps; disable color capture.
 - **Volume allocation fails** — not enough GPU memory for the preset; pick a smaller

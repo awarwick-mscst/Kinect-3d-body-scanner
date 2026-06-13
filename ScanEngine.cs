@@ -17,6 +17,7 @@ namespace KinectScanner
         public int VoxelsZ;
         public float DefaultMinDepth;
         public float DefaultMaxDepth;
+        public string Tip;
 
         public float SizeX { get { return VoxelsX / VoxelsPerMeter; } }
         public float SizeY { get { return VoxelsY / VoxelsPerMeter; } }
@@ -30,15 +31,24 @@ namespace KinectScanner
 
         public static VolumePreset[] All = new[]
         {
+            // Bust is the most motion-sensitive mode (close range amplifies movement,
+            // and a head has little geometry to track). The volume is sized to take in
+            // the shoulders/upper chest — feature-rich geometry that anchors tracking —
+            // while keeping ~2.6 mm detail on the face. Depth window starts at 0.6 m to
+            // stay off the noisy 0.5 m sensor floor.
             new VolumePreset { Name = "Bust – head & shoulders (high detail)",
-                VoxelsPerMeter = 384, VoxelsX = 384, VoxelsY = 384, VoxelsZ = 384,
-                DefaultMinDepth = 0.5f, DefaultMaxDepth = 1.4f },
+                VoxelsPerMeter = 384, VoxelsX = 448, VoxelsY = 448, VoxelsZ = 448,
+                DefaultMinDepth = 0.6f, DefaultMaxDepth = 1.5f,
+                Tip = "Highest detail, but the most motion-sensitive. Rotate VERY slowly "
+                    + "(≈2 min/turn) and keep your shoulders in frame — a bare head is hard to track." },
             new VolumePreset { Name = "Seated person (swivel chair)",
                 VoxelsPerMeter = 256, VoxelsX = 384, VoxelsY = 384, VoxelsZ = 384,
-                DefaultMinDepth = 0.7f, DefaultMaxDepth = 2.0f },
+                DefaultMinDepth = 0.7f, DefaultMaxDepth = 2.0f,
+                Tip = "Good all-rounder. Rotate smoothly, ~1 min/turn, keeping arms still." },
             new VolumePreset { Name = "Full body, standing",
                 VoxelsPerMeter = 256, VoxelsX = 384, VoxelsY = 512, VoxelsZ = 384,
-                DefaultMinDepth = 1.4f, DefaultMaxDepth = 2.8f },
+                DefaultMinDepth = 1.4f, DefaultMaxDepth = 2.8f,
+                Tip = "Most forgiving for tracking (far range). Hold a still pose and turn slowly." },
         };
     }
 
@@ -54,7 +64,7 @@ namespace KinectScanner
 
         // --- Auto-recovery (camera pose finder / relocalization) tuning ---
         // Attempt relocalization once tracking has failed this many frames in a row.
-        private const int RecoverAfterFailures = 4;
+        private const int RecoverAfterFailures = 3;
         // Try at most this many candidate poses from the pose-finder database.
         private const int MaxPosesToTest = 5;
         // Iterations used to verify/refine a candidate pose against the reconstruction.
@@ -67,8 +77,22 @@ namespace KinectScanner
         // Minimum normalized distance between stored poses (the finder keeps frames spread out).
         private const float PoseFinderMinDistanceThreshold = 0.3f;
 
+        // --- Tracking robustness ---
+        // Bilateral depth smoothing reduces sensor noise so ICP stays locked on
+        // marginal surfaces (mesh / dark chair backs, flat panels). From the
+        // KinectFusionExplorer sample.
+        private const int SmoothingKernelWidth = 1;             // 1 => 3x3 neighborhood
+        private const float SmoothingDistanceThreshold = 0.04f; // meters
+        // A couple more ICP iterations than the SDK default (7) for steadier tracking.
+        private const int AlignIterationCount = 9;
+        // Below this fraction of in-range depth pixels the view is too feature-poor to
+        // blame the user for a tracking failure (e.g. a dark mesh chair back).
+        private const float SparseViewFraction = 0.05f;
+
         private ColorReconstruction volume;
         private FusionFloatImageFrame depthFloatFrame;
+        private FusionFloatImageFrame smoothDepthFloatFrame;
+        private FusionFloatImageFrame activeDepthFrame; // depthFloat or smoothed, per frame
         private FusionColorImageFrame colorInputFrame;
         private FusionPointCloudImageFrame raycastPointCloud;
         private FusionColorImageFrame shadedSurfaceFrame;
@@ -102,6 +126,13 @@ namespace KinectScanner
         /// <summary>Number of keyframe poses currently stored for relocalization.</summary>
         public int StoredPoseCount { get; private set; }
 
+        /// <summary>Bilateral-smooth depth before tracking for steadier alignment.</summary>
+        public bool SmoothDepth { get; set; } = true;
+        /// <summary>Fraction of the frame with usable in-range depth (0..1).</summary>
+        public float ValidDepthFraction { get; private set; }
+        /// <summary>True when too little of the frame has depth to fairly expect tracking.</summary>
+        public bool SparseDepthView { get; private set; }
+
         /// <summary>Create (or re-create) the reconstruction volume for a preset.</summary>
         public void Recreate(VolumePreset newPreset, float minDepth)
         {
@@ -132,6 +163,7 @@ namespace KinectScanner
             if (depthFloatFrame == null)
             {
                 depthFloatFrame = new FusionFloatImageFrame(DepthWidth, DepthHeight);
+                smoothDepthFloatFrame = new FusionFloatImageFrame(DepthWidth, DepthHeight);
                 colorInputFrame = new FusionColorImageFrame(DepthWidth, DepthHeight);
                 raycastPointCloud = new FusionPointCloudImageFrame(DepthWidth, DepthHeight);
                 shadedSurfaceFrame = new FusionColorImageFrame(DepthWidth, DepthHeight);
@@ -221,7 +253,21 @@ namespace KinectScanner
             int[] displayPixels)
         {
             volume.DepthToDepthFloatFrame(depthData, depthFloatFrame, minDepth, maxDepth, false);
+            ComputeDepthCoverage(depthData, minDepth, maxDepth);
             JustRecovered = false;
+
+            // Bilateral-smooth the depth so ICP has a cleaner surface to lock onto.
+            // The smoothed frame is used for alignment, integration and relocalization.
+            if (SmoothDepth)
+            {
+                volume.SmoothDepthFloatFrame(
+                    depthFloatFrame, smoothDepthFloatFrame, SmoothingKernelWidth, SmoothingDistanceThreshold);
+                activeDepthFrame = smoothDepthFloatFrame;
+            }
+            else
+            {
+                activeDepthFrame = depthFloatFrame;
+            }
 
             // If tracking has been failing, try to relocalize from the pose-finder
             // database before integrating. On success we adopt the recovered pose but
@@ -243,9 +289,9 @@ namespace KinectScanner
             {
                 colorInputFrame.CopyPixelDataFrom(colorAtDepth);
                 trackingOk = volume.ProcessFrame(
-                    depthFloatFrame,
+                    activeDepthFrame,
                     colorInputFrame,
-                    FusionDepthProcessor.DefaultAlignIterationCount,
+                    AlignIterationCount,
                     integrationWeight,
                     FusionDepthProcessor.DefaultColorIntegrationOfAllAngles,
                     out alignmentEnergy,
@@ -255,8 +301,8 @@ namespace KinectScanner
             else
             {
                 trackingOk = volume.ProcessFrame(
-                    depthFloatFrame,
-                    FusionDepthProcessor.DefaultAlignIterationCount,
+                    activeDepthFrame,
+                    AlignIterationCount,
                     integrationWeight,
                     out alignmentEnergy,
                     worldToCamera);
@@ -292,7 +338,7 @@ namespace KinectScanner
                 FillPoseFinderColorFromDepth();
 
                 using (MatchCandidates candidates =
-                    poseFinder.FindCameraPose(depthFloatFrame, poseFinderColorFrame))
+                    poseFinder.FindCameraPose(activeDepthFrame, poseFinderColorFrame))
                 {
                     if (candidates == null || candidates.GetPoseCount() == 0)
                     {
@@ -309,7 +355,7 @@ namespace KinectScanner
                     {
                         float energy;
                         bool aligned = volume.AlignDepthFloatToReconstruction(
-                            depthFloatFrame, RecoveryAlignIterations, null, out energy, poses[i]);
+                            activeDepthFrame, RecoveryAlignIterations, null, out energy, poses[i]);
 
                         if (aligned && energy < bestEnergy)
                         {
@@ -353,7 +399,7 @@ namespace KinectScanner
                 FillPoseFinderColorFromDepth();
                 bool addedPose, trimmedHistory;
                 poseFinder.ProcessFrame(
-                    depthFloatFrame, poseFinderColorFrame, worldToCamera,
+                    activeDepthFrame, poseFinderColorFrame, worldToCamera,
                     PoseFinderMinDistanceThreshold, out addedPose, out trimmedHistory);
                 if (addedPose)
                 {
@@ -370,9 +416,29 @@ namespace KinectScanner
         /// Fill the pose-finder color frame with a grayscale rendering of the current
         /// depth float frame, so relocalization is independent of RGB capture.
         /// </summary>
+        /// <summary>Count usable in-range depth pixels to flag feature-poor views.</summary>
+        private void ComputeDepthCoverage(ushort[] depthData, float minDepth, float maxDepth)
+        {
+            int lo = (int)(minDepth * 1000f);
+            int hi = (int)(maxDepth * 1000f);
+            int count = 0;
+            int n = depthData.Length;
+            for (int i = 0; i < n; i++)
+            {
+                int d = depthData[i];
+                if (d >= lo && d <= hi)
+                {
+                    count++;
+                }
+            }
+
+            ValidDepthFraction = (float)count / PixelCount;
+            SparseDepthView = ValidDepthFraction < SparseViewFraction;
+        }
+
         private void FillPoseFinderColorFromDepth()
         {
-            depthFloatFrame.CopyPixelDataTo(depthFloatScratch);
+            activeDepthFrame.CopyPixelDataTo(depthFloatScratch);
 
             unchecked
             {
@@ -440,6 +506,7 @@ namespace KinectScanner
         {
             DisposeVolume();
             if (depthFloatFrame != null) { depthFloatFrame.Dispose(); depthFloatFrame = null; }
+            if (smoothDepthFloatFrame != null) { smoothDepthFloatFrame.Dispose(); smoothDepthFloatFrame = null; }
             if (colorInputFrame != null) { colorInputFrame.Dispose(); colorInputFrame = null; }
             if (raycastPointCloud != null) { raycastPointCloud.Dispose(); raycastPointCloud = null; }
             if (shadedSurfaceFrame != null) { shadedSurfaceFrame.Dispose(); shadedSurfaceFrame = null; }

@@ -62,14 +62,18 @@
                 <GroupBox Header="Scan volume">
                     <!-- The window-level TextBlock style is light-on-dark; the combo's
                          chrome and popup are light, so force dark text inside it. -->
-                    <ComboBox x:Name="PresetCombo" Padding="8,6"
-                              SelectionChanged="PresetCombo_SelectionChanged">
-                        <ComboBox.Resources>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Foreground" Value="#FF15161A"/>
-                            </Style>
-                        </ComboBox.Resources>
-                    </ComboBox>
+                    <StackPanel>
+                        <ComboBox x:Name="PresetCombo" Padding="8,6"
+                                  SelectionChanged="PresetCombo_SelectionChanged">
+                            <ComboBox.Resources>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="#FF15161A"/>
+                                </Style>
+                            </ComboBox.Resources>
+                        </ComboBox>
+                        <TextBlock x:Name="PresetTip" FontSize="11" Foreground="#FFC9A227"
+                                   TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    </StackPanel>
                 </GroupBox>
 
                 <GroupBox Header="Depth window (meters)">
@@ -112,6 +116,11 @@
                                   Checked="AutoRecoveryCheck_Changed" Unchecked="AutoRecoveryCheck_Changed"/>
                         <TextBlock FontSize="11" Foreground="#FF8A8F98" TextWrapping="Wrap" Margin="0,2,0,0"
                                    Text="Relocalizes automatically if you rotate too fast — just hold still a moment when it says 'Recovering'."/>
+                        <CheckBox x:Name="SmoothDepthCheck" Content="Smooth depth (steadier tracking)" IsChecked="True"
+                                  Margin="0,8,0,0"
+                                  Checked="SmoothDepthCheck_Changed" Unchecked="SmoothDepthCheck_Changed"/>
+                        <TextBlock FontSize="11" Foreground="#FF8A8F98" TextWrapping="Wrap" Margin="0,2,0,0"
+                                   Text="Reduces sensor noise so tracking holds on hard surfaces (mesh/dark chair backs, flat panels). Turn off for maximum fine detail."/>
                         <CheckBox x:Name="AudioCuesCheck" Content="Audio cues (scan by ear)" IsChecked="True"
                                   Margin="0,8,0,0"
                                   Checked="AudioCuesCheck_Changed" Unchecked="AudioCuesCheck_Changed"/>
