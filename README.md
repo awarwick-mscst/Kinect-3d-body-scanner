@@ -100,6 +100,51 @@ through MeshLab/Blender for hole filling (e.g. Poisson reconstruction) and clean
   track fairly (e.g. a dark mesh chair back fills the frame), the buzz is suppressed
   and the status shows "Sparse view" instead of falsely nagging you to slow down.
 
+## High-detail faces: Color Burst → photogrammetry
+
+The Kinect's depth sensor is too coarse for crisp facial detail (it resolves only
+~2–3 mm and a face moves slightly during the slow scan, so features "melt"). For a
+sharp face, use **photogrammetry** instead — reconstructing geometry from ordinary
+high-resolution photos, which carry far more detail than depth.
+
+The **Color Burst** button captures the Kinect's full-resolution (1920×1080) color
+camera as a sequence of JPEGs while you slowly turn:
+
+1. Press **📷 Start Color Burst**. A timestamped folder is created under
+   `Documents\KinectScans\colorburst_<date>`.
+2. Turn slowly through the angles you want (one revolution, or just the face). Photos
+   are saved ~3×/second; the status shows the running count.
+3. Press **⏹ Stop Color Burst** — the folder opens automatically.
+4. Process the folder in Meshroom (steps below) to build a textured mesh.
+
+Tips for good photogrammetry input: **bright, even lighting** (the color camera needs
+light and slows its shutter in the dark, causing blur); **rotate slowly** to avoid
+motion blur; keep a **neutral, frozen expression**; ensure lots of overlap between
+consecutive shots (the slow turn handles this). A phone camera will give even better
+results than the Kinect's color camera if you want maximum quality — the same software
+workflow applies.
+
+### Running Meshroom (manual workflow)
+
+1. **Install:** download Meshroom from the
+   [AliceVision GitHub releases](https://github.com/alicevision/Meshroom/releases)
+   (Windows `.zip`) or [FOSSHub](https://www.fosshub.com/Meshroom.html). It is portable —
+   unzip anywhere and run `Meshroom.exe`. It needs an NVIDIA CUDA GPU for the dense step.
+2. **⚠️ Background vs. rotation — the #1 cause of failed self-scans.** Photogrammetry
+   solves camera positions from matched features. If *you* rotate while the camera and
+   background stay still, Meshroom sees a static background plus a spinning subject and
+   can't solve it (the same rigidity assumption the Kinect tracker has). Fix it one of
+   two ways: have a helper move the camera around your *stationary* head (best), or hang
+   a **plain, featureless backdrop** (a bedsheet) behind you so only your face drives the
+   solve. A cluttered room behind a rotating you will fail.
+3. **Cull blurry photos** before importing — blur corrupts the reconstruction.
+4. In Meshroom: **File → Save As** (so output lands next to the project), **drag your
+   photo folder** into the *Images* panel, then click the green **Start** button.
+5. Wait for the pipeline (~10 nodes). ~150 photos on a 2080 Ti ≈ 20–60 min.
+6. Output: `<project>\MeshroomCache\Texturing\<id>\texturedMesh.obj` (+ `.mtl` + texture).
+7. **Combine (optional):** in Blender/MeshLab, use the Kinect mesh for the body and the
+   Meshroom mesh for the face, align, and stitch — clean body + sharp textured face.
+
 ## Preparing the model for 3D printing
 
 The raw scan includes the floor plane, the chair, and a noisy base — fine for viewing,

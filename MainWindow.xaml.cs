@@ -71,6 +71,16 @@ namespace KinectScanner
         private int sensorDropouts;
         private bool sensorWasAvailable;
 
+        // Color burst — saves full-res color photos for external photogrammetry.
+        private bool colorBurstActive;
+        private string colorBurstDir;
+        private int colorBurstCount;
+        private int colorBurstBusy; // 0 = free, 1 = JPEG encode in flight (Interlocked)
+        private DateTime lastColorBurstSave;
+        private WriteableBitmap colorBurstBitmap;
+        private const double ColorBurstIntervalMs = 350; // ~3 photos/sec
+        private const int ColorBurstJpegQuality = 92;
+
         // Audio cues — let the user scan by ear without watching the screen.
         private enum AudioCue { Good, Lost, Quiet }
         private SoundCues soundCues;
@@ -137,6 +147,7 @@ namespace KinectScanner
             colorWidth = colorDesc.Width;
             colorHeight = colorDesc.Height;
             colorBytes = new byte[colorWidth * colorHeight * 4];
+            colorBurstBitmap = new WriteableBitmap(colorWidth, colorHeight, 96, 96, PixelFormats.Bgr32, null);
 
             OpenReader();
             sensor.IsAvailableChanged += Sensor_IsAvailableChanged;
@@ -242,10 +253,19 @@ namespace KinectScanner
                 reader = null;
             }
 
-            FrameSourceTypes types = FrameSourceTypes.Depth;
-            if (CaptureColorCheck.IsChecked == true)
+            FrameSourceTypes types;
+            if (colorBurstActive)
             {
-                types |= FrameSourceTypes.Color;
+                // Photogrammetry capture wants only the full-res color stream.
+                types = FrameSourceTypes.Color;
+            }
+            else
+            {
+                types = FrameSourceTypes.Depth;
+                if (CaptureColorCheck.IsChecked == true)
+                {
+                    types |= FrameSourceTypes.Color;
+                }
             }
 
             reader = sensor.OpenMultiSourceFrameReader(types);
@@ -329,6 +349,12 @@ namespace KinectScanner
             MultiSourceFrame multiFrame = e.FrameReference.AcquireFrame();
             if (multiFrame == null)
             {
+                return;
+            }
+
+            if (colorBurstActive)
+            {
+                HandleColorBurst(multiFrame);
                 return;
             }
 
@@ -807,11 +833,28 @@ namespace KinectScanner
 
         private void UpdateUiState()
         {
+            // During a color burst, scanning controls are locked out and the main
+            // view shows the live color image — don't let normal state logic touch them.
+            if (colorBurstActive)
+            {
+                StartButton.IsEnabled = false;
+                PauseButton.IsEnabled = false;
+                ResetButton.IsEnabled = false;
+                ExportButton.IsEnabled = false;
+                PresetCombo.IsEnabled = false;
+                CaptureColorCheck.IsEnabled = false;
+                IdleHint.Visibility = Visibility.Collapsed;
+                TrackingDot.Fill = Brushes.MediumPurple;
+                TrackingText.Text = "Color burst";
+                return;
+            }
+
             bool idle = state == ScanState.Idle;
             StartButton.IsEnabled = volumeReady;
             StartButton.Content = idle ? "▶  Start Scan" : "▶  Restart Scan";
             PauseButton.IsEnabled = !idle;
             PauseButton.Content = state == ScanState.Paused ? "⏵  Resume" : "⏸  Pause";
+            ResetButton.IsEnabled = volumeReady;
             ExportButton.IsEnabled = !idle || (volumeReady && engine.FramesIntegrated > 0);
             PresetCombo.IsEnabled = idle;
             CaptureColorCheck.IsEnabled = idle;
@@ -822,6 +865,125 @@ namespace KinectScanner
                 MainImage.Source = depthPreviewBitmap;
                 TrackingDot.Fill = Brushes.Gray;
                 TrackingText.Text = "Idle";
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Color burst (full-res photos for external photogrammetry)
+        // ------------------------------------------------------------------
+
+        private void ColorBurstButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (colorBurstActive)
+            {
+                StopColorBurst();
+            }
+            else
+            {
+                StartColorBurst();
+            }
+        }
+
+        private void StartColorBurst()
+        {
+            // Burst is a standalone capture mode — leave any in-progress scan alone
+            // but switch out of scanning so the two pipelines don't fight.
+            state = ScanState.Idle;
+
+            string baseDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "KinectScans");
+            colorBurstDir = Path.Combine(baseDir, "colorburst_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            try
+            {
+                Directory.CreateDirectory(colorBurstDir);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Couldn't create capture folder:\n\n" + ex.Message,
+                    "Kinect 3D Scanner", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            colorBurstCount = 0;
+            lastColorBurstSave = DateTime.MinValue;
+            colorBurstActive = true;
+            OpenReader(); // re-open as color-only
+
+            MainImage.Source = colorBurstBitmap;
+            ColorBurstButton.Content = "⏹  Stop Color Burst";
+            ColorBurstStatus.Text = "Capturing… turn slowly. Saving to: " + colorBurstDir;
+            Log("Color burst started: " + colorBurstDir);
+            UpdateUiState();
+        }
+
+        private void StopColorBurst()
+        {
+            colorBurstActive = false;
+            OpenReader(); // restore depth (+optional color) stream
+
+            MainImage.Source = depthPreviewBitmap;
+            ColorBurstButton.Content = "📷  Start Color Burst…";
+            ColorBurstStatus.Text = string.Format(
+                "Saved {0} photos to {1}. Import that folder into Meshroom / RealityCapture.",
+                colorBurstCount, colorBurstDir);
+            Log("Color burst stopped: " + colorBurstCount + " photos.");
+            UpdateUiState();
+
+            if (colorBurstCount > 0)
+            {
+                try { Process.Start("explorer.exe", "\"" + colorBurstDir + "\""); }
+                catch (Exception) { }
+            }
+        }
+
+        private void HandleColorBurst(MultiSourceFrame multiFrame)
+        {
+            using (ColorFrame colorFrame = multiFrame.ColorFrameReference.AcquireFrame())
+            {
+                if (colorFrame == null)
+                {
+                    return;
+                }
+                colorFrame.CopyConvertedFrameDataToArray(colorBytes, ColorImageFormat.Bgra);
+            }
+
+            colorBurstBitmap.WritePixels(
+                new Int32Rect(0, 0, colorWidth, colorHeight), colorBytes, colorWidth * 4, 0);
+
+            DateTime now = DateTime.UtcNow;
+            if ((now - lastColorBurstSave).TotalMilliseconds >= ColorBurstIntervalMs
+                && Interlocked.CompareExchange(ref colorBurstBusy, 1, 0) == 0)
+            {
+                lastColorBurstSave = now;
+                int index = ++colorBurstCount;
+                byte[] snapshot = (byte[])colorBytes.Clone();
+                string path = Path.Combine(colorBurstDir, "frame_" + index.ToString("D5") + ".jpg");
+                ColorBurstStatus.Text = "Captured " + index + " photos — turn slowly.";
+                Task.Run(() => SaveColorJpeg(snapshot, path));
+            }
+        }
+
+        private void SaveColorJpeg(byte[] bgra, string path)
+        {
+            try
+            {
+                var source = BitmapSource.Create(
+                    colorWidth, colorHeight, 96, 96, PixelFormats.Bgra32, null, bgra, colorWidth * 4);
+                source.Freeze();
+                var encoder = new JpegBitmapEncoder { QualityLevel = ColorBurstJpegQuality };
+                encoder.Frames.Add(BitmapFrame.Create(source));
+                using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write))
+                {
+                    encoder.Save(fs);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("Color burst save failed: " + ex.Message);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref colorBurstBusy, 0);
             }
         }
 

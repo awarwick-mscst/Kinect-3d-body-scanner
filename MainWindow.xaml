@@ -149,6 +149,16 @@
                             IsEnabled="False" Click="ExportButton_Click"/>
                 </Grid>
 
+                <GroupBox Header="Color burst (for photogrammetry)">
+                    <StackPanel>
+                        <Button x:Name="ColorBurstButton" Content="📷  Start Color Burst…"
+                                Click="ColorBurstButton_Click"/>
+                        <TextBlock x:Name="ColorBurstStatus" FontSize="11.5" Foreground="#FFB8BBC0"
+                                   TextWrapping="Wrap" Margin="0,2,0,0"
+                                   Text="Saves full-resolution color photos (~3/sec) as you slowly turn. Feed the folder into Meshroom or RealityCapture for a high-detail face the depth sensor can't capture. Use bright, even lighting and rotate slowly to avoid motion blur."/>
+                    </StackPanel>
+                </GroupBox>
+
                 <GroupBox Header="Live depth preview">
                     <Image x:Name="DepthPreviewImage" Height="170" Stretch="Uniform"/>
                 </GroupBox>
