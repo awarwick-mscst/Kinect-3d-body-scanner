@@ -1,0 +1,178 @@
+<Window x:Class="KinectScanner.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Kinect 3D Body Scanner"
+        Width="1300" Height="860" MinWidth="1000" MinHeight="700"
+        Background="#FF1B1C22"
+        Loaded="Window_Loaded" Closing="Window_Closing">
+
+    <Window.Resources>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#FFDADCE0"/>
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="#FFDADCE0"/>
+            <Setter Property="Margin" Value="0,4,0,4"/>
+        </Style>
+        <Style TargetType="GroupBox">
+            <Setter Property="Foreground" Value="#FF9AA0A6"/>
+            <Setter Property="BorderBrush" Value="#FF3A3D46"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="Padding" Value="8,6,8,8"/>
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Margin" Value="0,0,8,8"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="360"/>
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Main reconstruction / preview view -->
+        <Border Grid.Column="0" Grid.Row="0" Margin="10" Background="#FF101114"
+                CornerRadius="6" BorderBrush="#FF3A3D46" BorderThickness="1">
+            <Grid>
+                <Image x:Name="MainImage" Stretch="Uniform" Margin="6"/>
+                <TextBlock x:Name="IdleHint"
+                           Text="Live depth view — position yourself in frame, then press Start Scan"
+                           HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                           Margin="0,0,0,18" FontSize="14" Foreground="#FFB8BBC0"/>
+                <Border x:Name="TrackingBanner" Visibility="Collapsed"
+                        Background="#DDB02A2A" CornerRadius="6" Padding="16,10"
+                        HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,18,0,0">
+                    <TextBlock x:Name="TrackingBannerText" FontWeight="Bold" FontSize="14" Foreground="White"
+                               Text="TRACKING LOST — slowly rotate back toward your last position (or press Reset)"/>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- Control panel -->
+        <ScrollViewer Grid.Column="1" Grid.Row="0" VerticalScrollBarVisibility="Auto" Margin="0,10,10,10">
+            <StackPanel>
+
+                <GroupBox Header="Scan volume">
+                    <!-- The window-level TextBlock style is light-on-dark; the combo's
+                         chrome and popup are light, so force dark text inside it. -->
+                    <ComboBox x:Name="PresetCombo" Padding="8,6"
+                              SelectionChanged="PresetCombo_SelectionChanged">
+                        <ComboBox.Resources>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="#FF15161A"/>
+                            </Style>
+                        </ComboBox.Resources>
+                    </ComboBox>
+                </GroupBox>
+
+                <GroupBox Header="Depth window (meters)">
+                    <StackPanel>
+                        <Grid>
+                            <TextBlock Text="Near clip"/>
+                            <TextBlock x:Name="MinDepthLabel" Text="0.50 m" HorizontalAlignment="Right"/>
+                        </Grid>
+                        <Slider x:Name="MinDepthSlider" Minimum="0.5" Maximum="2.5" Value="0.5"
+                                TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                ValueChanged="DepthSlider_ValueChanged"/>
+                        <Grid Margin="0,6,0,0">
+                            <TextBlock Text="Far clip"/>
+                            <TextBlock x:Name="MaxDepthLabel" Text="2.00 m" HorizontalAlignment="Right"/>
+                        </Grid>
+                        <Slider x:Name="MaxDepthSlider" Minimum="0.8" Maximum="4.0" Value="2.0"
+                                TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                ValueChanged="DepthSlider_ValueChanged"/>
+                        <TextBlock x:Name="DepthRangeHint" FontSize="11" Foreground="#FF8A8F98"
+                                   TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Text="Only what is inside this range is scanned. Keep it tight around your body so the room is excluded."/>
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Header="Quality">
+                    <StackPanel>
+                        <Grid>
+                            <TextBlock Text="Integration weight"/>
+                            <TextBlock x:Name="WeightLabel" Text="150" HorizontalAlignment="Right"/>
+                        </Grid>
+                        <Slider x:Name="WeightSlider" Minimum="50" Maximum="500" Value="150"
+                                TickFrequency="10" IsSnapToTickEnabled="True"
+                                ValueChanged="WeightSlider_ValueChanged"/>
+                        <TextBlock FontSize="11" Foreground="#FF8A8F98" TextWrapping="Wrap" Margin="0,2,0,6"
+                                   Text="Lower = adapts faster to slight body movement; higher = smoother surface."/>
+                        <CheckBox x:Name="CaptureColorCheck" Content="Capture color (textured model)" IsChecked="True"
+                                  Checked="CaptureColorCheck_Changed" Unchecked="CaptureColorCheck_Changed"/>
+                        <CheckBox x:Name="ColorViewCheck" Content="Show color rendering" IsChecked="False"/>
+                        <CheckBox x:Name="AutoRecoveryCheck" Content="Auto-recover lost tracking" IsChecked="True"
+                                  Checked="AutoRecoveryCheck_Changed" Unchecked="AutoRecoveryCheck_Changed"/>
+                        <TextBlock FontSize="11" Foreground="#FF8A8F98" TextWrapping="Wrap" Margin="0,2,0,0"
+                                   Text="Relocalizes automatically if you rotate too fast — just hold still a moment when it says 'Recovering'."/>
+                        <CheckBox x:Name="AudioCuesCheck" Content="Audio cues (scan by ear)" IsChecked="True"
+                                  Margin="0,8,0,0"
+                                  Checked="AudioCuesCheck_Changed" Unchecked="AudioCuesCheck_Changed"/>
+                        <TextBlock FontSize="11" Foreground="#FF8A8F98" TextWrapping="Wrap" Margin="0,2,0,0"
+                                   Text="Soft tick = tracking good · buzz = lost (slow down/hold still) · chime = recovered. Lets you scan without watching the screen."/>
+                    </StackPanel>
+                </GroupBox>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="StartButton" Grid.Column="0" Content="▶  Start Scan"
+                            FontWeight="Bold" Click="StartButton_Click"/>
+                    <Button x:Name="PauseButton" Grid.Column="1" Content="⏸  Pause"
+                            IsEnabled="False" Click="PauseButton_Click"/>
+                </Grid>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="ResetButton" Grid.Column="0" Content="↺  Reset" Click="ResetButton_Click"/>
+                    <Button x:Name="ExportButton" Grid.Column="1" Content="💾  Export Mesh…"
+                            IsEnabled="False" Click="ExportButton_Click"/>
+                </Grid>
+
+                <GroupBox Header="Live depth preview">
+                    <Image x:Name="DepthPreviewImage" Height="170" Stretch="Uniform"/>
+                </GroupBox>
+
+                <GroupBox Header="How to scan yourself (swivel chair method)">
+                    <TextBlock FontSize="11.5" Foreground="#FFB8BBC0" TextWrapping="Wrap">
+                        1. Put the Kinect on a tripod/table at chest height, pointing horizontally.&#10;
+                        2. Sit on a swivel chair 1–1.5 m away (use the depth preview to frame yourself).&#10;
+                        3. Set the far clip just behind your back — the view should show only you.&#10;
+                        4. Press Start Scan, hold still for 2 seconds, then rotate VERY slowly —&#10;
+                            one full turn in 60–90 seconds. Keep your pose frozen (arms still!).&#10;
+                        5. Watch the model build up. If tracking is lost, rotate back slowly until it recovers.&#10;
+                        6. After a full turn (plus a bit of overlap), press Pause, then Export Mesh.
+                    </TextBlock>
+                </GroupBox>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Status bar -->
+        <Border Grid.Row="1" Grid.ColumnSpan="2" Background="#FF24262E" Padding="12,7">
+            <Grid>
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse x:Name="TrackingDot" Width="11" Height="11" Fill="#FF707070"
+                             VerticalAlignment="Center" Margin="0,0,7,0"/>
+                    <TextBlock x:Name="TrackingText" Text="Idle" VerticalAlignment="Center" Margin="0,0,24,0"/>
+                    <TextBlock x:Name="FramesText" Text="Frames fused: 0" VerticalAlignment="Center" Margin="0,0,24,0"/>
+                    <TextBlock x:Name="FpsText" Text="Depth — fps" VerticalAlignment="Center" Margin="0,0,24,0"/>
+                    <TextBlock x:Name="ProcessorText" Text="" VerticalAlignment="Center" Foreground="#FF8A8F98"/>
+                </StackPanel>
+                <TextBlock x:Name="StatusText" Text="Starting…" HorizontalAlignment="Right"
+                           VerticalAlignment="Center" Foreground="#FF8A8F98"/>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>KinectScanner</AssemblyName>
+    <RootNamespace>KinectScanner</RootNamespace>
+    <!-- Kinect for Windows SDK 2.0 install location (KINECTSDK20_DIR is set by the SDK installer) -->
+    <KinectSdkDir Condition="'$(KINECTSDK20_DIR)' != ''">$(KINECTSDK20_DIR)</KinectSdkDir>
+    <KinectSdkDir Condition="'$(KinectSdkDir)' == ''">C:\Program Files\Microsoft SDKs\Kinect\v2.0_1409\</KinectSdkDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Microsoft.Kinect">
+      <HintPath>$(KinectSdkDir)Assemblies\Microsoft.Kinect.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.Kinect.Fusion">
+      <HintPath>$(KinectSdkDir)Redist\Fusion\x64\Microsoft.Kinect.Fusion.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- The managed Fusion wrapper needs the native Kinect20.Fusion.dll next to the exe -->
+  <Target Name="CopyFusionNativeDll" AfterTargets="Build">
+    <Copy SourceFiles="$(KinectSdkDir)Redist\Fusion\x64\Kinect20.Fusion.dll" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>
