@@ -25,16 +25,24 @@ dotnet build -c Release
 
 ## How to scan yourself (swivel chair method)
 
-1. **Camera setup:** put the Kinect on a tripod or shelf at chest height, level,
-   pointing at open space (no walls/furniture within ~3 m behind you if possible).
+1. **Camera setup:** put the Kinect on a tripod or shelf, level (or tilted to aim as
+   below), pointing at open space (no walls/furniture within ~3 m behind you if
+   possible). The capture box is **centered on the camera's optical axis**, so aim at
+   the *vertical middle* of whatever you want to capture: your **hips/waist for a
+   full-body scan** (so the box reaches floor-to-head and your feet are included), or
+   your **chest/face for a bust or seated upper-body scan**. Aiming at your chest for a
+   full-body scan is the usual reason feet get cut off.
 2. **Pick a preset** — *Bust* (highest detail), *Seated person*, or *Full body, standing*.
    Each preset shows a tip with the rotation speed it needs. Note that **Bust is the
    most motion-sensitive** mode: at close range a small turn moves a lot across the
    sensor, and a head has little geometry to track, so it needs a *very* slow turn
    (~2 min) and your shoulders kept in frame. If you're finding it fiddly, *Seated
    person* is far more forgiving and still captures good facial detail.
-3. **Sit/stand at the right distance** and use the live depth preview to frame
-   yourself: your body should be bright, everything else dark.
+3. **Sit/stand at the right distance** (~2–2.5 m for a full standing body) and use the
+   live depth preview to frame yourself **head to toe**: your whole body — feet
+   included — should be bright, everything else dark. If your feet aren't bright in the
+   preview, the sensor can't see them and no setting will recover them — re-aim or step
+   back until they show.
 4. **Tighten the depth window:** set the far clip just behind your back and the near
    clip just in front of you. This is the key step — Kinect Fusion thinks the world
    is rigid, so the static room must be clipped out of view; then your slow rotation
@@ -215,6 +223,13 @@ but you'll want to clean it before slicing in Cura:
   drape a textured cloth or tape a few markers on a totally flat back to give the
   tracker something to grip. The status shows **Sparse view** (and stays quiet)
   instead of buzzing when this is the surface's fault rather than yours.
+- **Feet (or head) cut off / can't reach the floor** — the capture box is centered on
+  the camera's optical axis, so aiming at your chest puts the box too high and clips
+  your feet. Aim the Kinect at your **hips/waist** (tilt it down or lower it), use the
+  **Full body** preset, and stand back ~2–2.5 m so you appear head-to-toe in the depth
+  preview. Because your feet touch the floor, a small floor patch under them is
+  unavoidable in the scan — trim it in MeshLab/Blender afterwards (it makes a clean,
+  flat base for printing).
 - **Low fps** — check the status bar: if it says CPU mode, your GPU lacks DX11
   support. Also close other GPU-heavy apps; disable color capture.
 - **Volume allocation fails** — not enough GPU memory for the preset; pick a smaller
