@@ -50,8 +50,10 @@ dotnet build -c Release
    hold still for a second and it relocalizes itself (dot flashes blue =
    "Recovered"), then carry on. If it can't recover, the red banner asks you to
    rotate back slowly toward your last good position.
-8. After a bit more than a full turn (overlap helps close seams), press **Pause**,
-   then **Export Mesh…**.
+8. When you hear the rising **three-note chime** (a full turn, ~350° by default), you're
+   done — with **Auto-stop** on (the default) the scan stops itself and saves a colored
+   `.ply` to `Documents\KinectScans\`, opening Explorer on the file. (With Auto-stop off,
+   press **Pause** then **Export Mesh…** manually instead.)
 
 Alternative mode: you stand perfectly still and a helper slowly walks/orbits the
 Kinect around you (handheld, smooth movements). Same settings apply.
@@ -99,6 +101,16 @@ through MeshLab/Blender for hole filling (e.g. Poisson reconstruction) and clean
   and play through your default audio device. When the view is too feature-poor to
   track fairly (e.g. a dark mesh chair back fills the frame), the buzz is suppressed
   and the status shows "Sparse view" instead of falsely nagging you to slow down.
+- **Rotation guide** — the status bar shows how far you've turned (`Turn: NNN°`),
+  computed from the tracked camera pose. With audio cues on, you get a *mid-tone tick*
+  at each quarter turn (90/180/270°) and a *rising three-note chime* when you reach the
+  target angle (default 350°). Adjust the target with the slider (270–370°). The angle
+  is approximate (a few degrees of drift) but accurate enough to time the stop.
+- **Auto-stop & save model at target** (on by default) — when you complete the turn the
+  scan **stops by itself and writes a colored `.ply`** to `Documents\KinectScans\`, then
+  opens Explorer with the file selected. You never have to reach the keyboard: set up
+  back-to-sensor, start, turn until the chime, and you're done. Uncheck it to keep the
+  old behavior (chime only; stop and export manually).
 
 ## High-detail faces: Color Burst → photogrammetry
 

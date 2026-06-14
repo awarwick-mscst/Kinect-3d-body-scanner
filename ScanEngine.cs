@@ -133,6 +133,18 @@ namespace KinectScanner
         /// <summary>True when too little of the frame has depth to fairly expect tracking.</summary>
         public bool SparseDepthView { get; private set; }
 
+        /// <summary>
+        /// Total angle the subject has turned since the scan started, in degrees
+        /// (cumulative swept path, so it keeps climbing past 360°). Derived from the
+        /// camera pose: on a turntable/swivel scan, the tracked camera appears to orbit
+        /// the subject, and the magnitude of that swept rotation equals the turn.
+        /// </summary>
+        public double CumulativeRotationDegrees { get; private set; }
+
+        private double accumRotX, accumRotY, accumRotZ;
+        private readonly double[] prevRot = new double[9];
+        private bool haveRotationRef;
+
         /// <summary>Create (or re-create) the reconstruction volume for a preset.</summary>
         public void Recreate(VolumePreset newPreset, float minDepth)
         {
@@ -236,6 +248,9 @@ namespace KinectScanner
             JustRecovered = false;
             StoredPoseCount = 0;
             addPoseCounter = 0;
+            CumulativeRotationDegrees = 0;
+            accumRotX = accumRotY = accumRotZ = 0;
+            haveRotationRef = false;
         }
 
         /// <summary>
@@ -278,6 +293,7 @@ namespace KinectScanner
             {
                 JustRecovered = true;
                 ConsecutiveFailures = 0;
+                haveRotationRef = false; // pose jumped on recovery — don't count that as turning
                 Render(renderColor, displayPixels);
                 return true;
             }
@@ -315,15 +331,59 @@ namespace KinectScanner
                 worldToCamera = volume.GetCurrentWorldToCameraTransform();
                 FramesIntegrated++;
                 ConsecutiveFailures = 0;
+                UpdateRotation();
                 MaybeAddPoseToFinder();
             }
             else
             {
                 ConsecutiveFailures++;
+                haveRotationRef = false; // skip the gap; re-seed when tracking resumes
             }
 
             Render(renderColor, displayPixels);
             return trackingOk;
+        }
+
+        /// <summary>
+        /// Accumulate the per-frame camera rotation into a cumulative swept angle.
+        /// Uses the magnitude of the summed small-angle rotation vector, so it is
+        /// independent of which axis the subject spins on and of matrix conventions.
+        /// </summary>
+        private void UpdateRotation()
+        {
+            Matrix4 m = worldToCamera;
+            double[] cur =
+            {
+                m.M11, m.M12, m.M13,
+                m.M21, m.M22, m.M23,
+                m.M31, m.M32, m.M33,
+            };
+
+            if (!haveRotationRef)
+            {
+                Array.Copy(cur, prevRot, 9);
+                haveRotationRef = true;
+                return;
+            }
+
+            // Relative rotation Rrel = cur * prev^T; Rrel[r,c] = sum_k cur[r,k]*prev[c,k].
+            // We only need the off-diagonal entries for the small-angle rotation vector.
+            double rel21 = cur[6] * prevRot[3] + cur[7] * prevRot[4] + cur[8] * prevRot[5];
+            double rel12 = cur[3] * prevRot[6] + cur[4] * prevRot[7] + cur[5] * prevRot[8];
+            double rel02 = cur[0] * prevRot[6] + cur[1] * prevRot[7] + cur[2] * prevRot[8];
+            double rel20 = cur[6] * prevRot[0] + cur[7] * prevRot[1] + cur[8] * prevRot[2];
+            double rel10 = cur[3] * prevRot[0] + cur[4] * prevRot[1] + cur[5] * prevRot[2];
+            double rel01 = cur[0] * prevRot[3] + cur[1] * prevRot[4] + cur[2] * prevRot[5];
+
+            accumRotX += (rel21 - rel12) * 0.5;
+            accumRotY += (rel02 - rel20) * 0.5;
+            accumRotZ += (rel10 - rel01) * 0.5;
+
+            double radians = Math.Sqrt(
+                accumRotX * accumRotX + accumRotY * accumRotY + accumRotZ * accumRotZ);
+            CumulativeRotationDegrees = radians * (180.0 / Math.PI);
+
+            Array.Copy(cur, prevRot, 9);
         }
 
         /// <summary>

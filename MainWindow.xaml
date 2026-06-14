@@ -129,6 +129,24 @@
                     </StackPanel>
                 </GroupBox>
 
+                <GroupBox Header="Rotation guide">
+                    <StackPanel>
+                        <Grid>
+                            <TextBlock Text="Stop / beep at"/>
+                            <TextBlock x:Name="RotationTargetLabel" Text="350°" HorizontalAlignment="Right"/>
+                        </Grid>
+                        <Slider x:Name="RotationTargetSlider" Minimum="270" Maximum="370" Value="350"
+                                TickFrequency="5" IsSnapToTickEnabled="True"
+                                ValueChanged="RotationTargetSlider_ValueChanged"/>
+                        <TextBlock FontSize="11" Foreground="#FF8A8F98" TextWrapping="Wrap" Margin="0,2,0,0"
+                                   Text="A rising 3-note chime plays once you've turned this far. Quarter-turn ticks mark 90/180/270° (needs audio cues on)."/>
+                        <CheckBox x:Name="AutoStopCheck" Content="Auto-stop &amp; save model at target" IsChecked="True"
+                                  Margin="0,8,0,0"/>
+                        <TextBlock FontSize="11" Foreground="#FF8A8F98" TextWrapping="Wrap" Margin="0,2,0,0"
+                                   Text="When you complete the turn, the scan stops by itself and saves a colored .ply to Documents\KinectScans — no need to reach the keyboard."/>
+                    </StackPanel>
+                </GroupBox>
+
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -186,6 +204,7 @@
                              VerticalAlignment="Center" Margin="0,0,7,0"/>
                     <TextBlock x:Name="TrackingText" Text="Idle" VerticalAlignment="Center" Margin="0,0,24,0"/>
                     <TextBlock x:Name="FramesText" Text="Frames fused: 0" VerticalAlignment="Center" Margin="0,0,24,0"/>
+                    <TextBlock x:Name="RotationText" Text="Turn: 0°" VerticalAlignment="Center" Margin="0,0,24,0"/>
                     <TextBlock x:Name="FpsText" Text="Depth — fps" VerticalAlignment="Center" Margin="0,0,24,0"/>
                     <TextBlock x:Name="ProcessorText" Text="" VerticalAlignment="Center" Foreground="#FF8A8F98"/>
                 </StackPanel>

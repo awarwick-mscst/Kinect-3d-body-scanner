@@ -88,6 +88,8 @@ namespace KinectScanner
         private AudioCue audioCue = AudioCue.Good;
         private DateTime lastHeartbeat;
         private DateTime lastAlert;
+        private int lastRotationQuarter;
+        private bool rotationTargetReached;
         // Consecutive tracking failures before the audio declares "lost" (hysteresis
         // so a single dropped frame doesn't buzz). Lower than the on-screen banner
         // threshold so the user hears trouble early.
@@ -426,6 +428,7 @@ namespace KinectScanner
                 bool trackingOk;
                 int framesIntegrated, consecutiveFailures, storedPoses;
                 bool justRecovered, sparseView;
+                double rotationDeg;
                 var stopwatch = Stopwatch.StartNew();
                 lock (engineLock)
                 {
@@ -441,6 +444,7 @@ namespace KinectScanner
                     storedPoses = engine.StoredPoseCount;
                     justRecovered = engine.JustRecovered;
                     sparseView = engine.SparseDepthView;
+                    rotationDeg = engine.CumulativeRotationDegrees;
                 }
                 stopwatch.Stop();
                 lastFusionMs = (int)stopwatch.ElapsedMilliseconds;
@@ -490,7 +494,9 @@ namespace KinectScanner
                                 : "Tracking lost (" + consecutiveFailures + ")";
                         }
 
+                        RotationText.Text = "Turn: " + ((int)rotationDeg) + "°";
                         UpdateAudioState(trackingOk, consecutiveFailures, sparseView);
+                        UpdateRotationCues(rotationDeg);
                     }), DispatcherPriority.Render);
                 }
             }
@@ -626,6 +632,8 @@ namespace KinectScanner
             audioCue = AudioCue.Good;
             lastHeartbeat = DateTime.UtcNow;
             lastAlert = DateTime.UtcNow;
+            lastRotationQuarter = 0;
+            rotationTargetReached = false;
             state = ScanState.Scanning;
             MainImage.Source = reconstructionBitmap;
             StatusText.Text = "Scanning — hold still 2 s, then rotate very slowly.";
@@ -700,7 +708,15 @@ namespace KinectScanner
                 return;
             }
 
-            string path = dialog.FileName;
+            await DoExportAsync(dialog.FileName, true);
+        }
+
+        /// <summary>
+        /// Generate the mesh and write it to <paramref name="path"/>. Shared by the
+        /// manual Export button and the automatic stop-at-target-rotation flow.
+        /// </summary>
+        private async Task DoExportAsync(string path, bool revealInExplorer)
+        {
             bool withColor = engine.ColorCaptured;
 
             ExportButton.IsEnabled = false;
@@ -725,17 +741,53 @@ namespace KinectScanner
 
                 StatusText.Text = string.Format("Exported {0:N0} vertices / {1:N0} triangles → {2}",
                     counts.Item1, counts.Item2, path);
+                Log(string.Format("Exported {0} verts / {1} tris to {2}",
+                    counts.Item1, counts.Item2, path));
+
+                if (revealInExplorer)
+                {
+                    try { Process.Start("explorer.exe", "/select,\"" + path + "\""); }
+                    catch (Exception) { }
+                }
             }
             catch (Exception ex)
             {
                 MessageBox.Show(this, "Export failed:\n\n" + ex.Message, "Kinect 3D Scanner",
                     MessageBoxButton.OK, MessageBoxImage.Error);
                 StatusText.Text = "Export failed.";
+                Log("Export failed: " + ex.Message);
             }
             finally
             {
                 UpdateUiState();
             }
+        }
+
+        /// <summary>
+        /// Fired when the subject has turned all the way around: stop integrating and
+        /// automatically save the model, so the user never has to reach the keyboard.
+        /// </summary>
+        private async void AutoStopAndSave(double degrees)
+        {
+            state = ScanState.Paused;
+            UpdateUiState();
+
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "KinectScans");
+            string path = Path.Combine(dir, "scan_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".ply");
+            try
+            {
+                Directory.CreateDirectory(dir);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Auto-save folder error: " + ex.Message;
+                return;
+            }
+
+            StatusText.Text = string.Format("Full turn ({0}°) — stopping and saving model…", (int)degrees);
+            Log(string.Format("Auto-stop at {0}° rotation; saving {1}", (int)degrees, path));
+            await DoExportAsync(path, true);
         }
 
         private void DepthSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -1066,6 +1118,62 @@ namespace KinectScanner
                 }
             }
             // AudioCue.Quiet: say nothing
+        }
+
+        /// <summary>
+        /// Quarter-turn ticks while turning, and a one-shot "full turn" chime at the
+        /// target angle, so the user knows when to stop without watching the screen.
+        /// </summary>
+        private void UpdateRotationCues(double degrees)
+        {
+            if (state != ScanState.Scanning)
+            {
+                return;
+            }
+
+            bool audio = soundCues != null && AudioCuesCheck.IsChecked == true;
+            int target = (int)RotationTargetSlider.Value;
+
+            // Quarter-turn ticks (audio only — purely a progress cue).
+            int quarter = (int)(degrees / 90.0);
+            if (quarter > lastRotationQuarter && quarter * 90 < target)
+            {
+                lastRotationQuarter = quarter;
+                if (audio)
+                {
+                    soundCues.PlayMilestone();
+                }
+            }
+
+            // Target reached: chime (if audio on), then stop & save (if enabled).
+            if (!rotationTargetReached && degrees >= target)
+            {
+                rotationTargetReached = true;
+                if (audio)
+                {
+                    soundCues.PlayTargetReached();
+                }
+
+                if (AutoStopCheck.IsChecked == true)
+                {
+                    AutoStopAndSave(degrees);
+                }
+                else
+                {
+                    StatusText.Text = string.Format(
+                        "Full turn reached ({0}°) — stop and export, or keep going to overlap.", (int)degrees);
+                }
+            }
+        }
+
+        private void RotationTargetSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (!initialized)
+            {
+                return;
+            }
+
+            RotationTargetLabel.Text = ((int)RotationTargetSlider.Value) + "°";
         }
 
         private void AudioCuesCheck_Changed(object sender, RoutedEventArgs e)

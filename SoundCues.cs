@@ -17,6 +17,8 @@ namespace KinectScanner
         private readonly SoundPlayer heartbeat;
         private readonly SoundPlayer lost;
         private readonly SoundPlayer recovered;
+        private readonly SoundPlayer milestone;
+        private readonly SoundPlayer targetReached;
 
         public SoundCues()
         {
@@ -26,11 +28,20 @@ namespace KinectScanner
             lost = MakePlayer(new[] { new Tone(440.0, 140, 0.5), new Tone(311.1, 180, 0.5) });
             // Regained: pleasant rising two-note chime.
             recovered = MakePlayer(new[] { new Tone(659.25, 90, 0.42), new Tone(987.77, 140, 0.42) });
+            // Quarter-turn tick: a single mid "bong", distinct from the high heartbeat.
+            milestone = MakePlayer(new[] { new Tone(587.33, 90, 0.34) });
+            // Target reached (full turn): celebratory rising three-note arpeggio.
+            targetReached = MakePlayer(new[]
+            {
+                new Tone(659.25, 110, 0.45), new Tone(830.61, 110, 0.45), new Tone(1046.5, 170, 0.45),
+            });
         }
 
         public void PlayHeartbeat() { SafePlay(heartbeat); }
         public void PlayLost() { SafePlay(lost); }
         public void PlayRecovered() { SafePlay(recovered); }
+        public void PlayMilestone() { SafePlay(milestone); }
+        public void PlayTargetReached() { SafePlay(targetReached); }
 
         private static void SafePlay(SoundPlayer player)
         {
@@ -116,6 +127,8 @@ namespace KinectScanner
             if (heartbeat != null) { heartbeat.Dispose(); }
             if (lost != null) { lost.Dispose(); }
             if (recovered != null) { recovered.Dispose(); }
+            if (milestone != null) { milestone.Dispose(); }
+            if (targetReached != null) { targetReached.Dispose(); }
         }
     }
 }
